@@ -4,11 +4,16 @@ import sys
 import logging
 from itertools import groupby
 import time
-import re
+from customFunctions import *
 
-scaffold_regex = re.compile(r'Rc-[^-]*')
-
-def parse_psl(psl, feature, gff, gff_cols, exons={}):
+# kwargs recognized:
+    # gffs - A dictionary, where the key 
+        # is the name and where the value
+        # is a dictionary of mRNA names each with a 
+        # list of (start, stop) values
+    # exons - A dictionary of gene name -> scaffold name,
+        # mRNA name -> start, end, and strand
+def parse_psl(psl, feature, **kwargs):
     stime = time.time()
     # Keep track of Qnames so as to avoid looking at
     # secondary alignments
@@ -22,12 +27,14 @@ def parse_psl(psl, feature, gff, gff_cols, exons={}):
             cols = line.strip().split('\t')
             match = int(cols[0])
             cols[0] = match
+            # This mRNA name is derived from
+            # the maker 
             mrna_name = cols[9]
             scaffold_name = cols[13]
-            # Replace mrna scaffold name with new scaffold name
-            #mrna_name = re.sub(scaffold_regex, scaffold_name, mrna_name)
             blocksizes = [int(x) for x in cols[18].strip(',').split(',')]
             nblocks = len(blocksizes)
+            # This stuff just ensures that only the alignment
+            # with the most matches is looked at
             if mrna_name in to_analyze:
                 if match > to_analyze[mrna_name]['cols'][0]:
                     to_analyze[mrna_name] = {
@@ -52,11 +59,11 @@ def parse_psl(psl, feature, gff, gff_cols, exons={}):
             logging.debug('blocksizes: {}'.format(blocksizes))
             strand = cols[8]
             # Why is this condition here? Removing...
-            #if exons or exons == {}:
+            # if exons or exons == {}:
                 # Get the gene name
             gene_name = mrna_name.rsplit('-',2)[0]
-            if not exons:
-                exons = {
+            if 'exons' not in kwargs:
+                kwargs['exons'] = {
                     gene_name: {
                         'scaffold_name': scaffold_name,
                         'mrna_name': {
@@ -68,8 +75,8 @@ def parse_psl(psl, feature, gff, gff_cols, exons={}):
                         }
                     }
                 }
-            elif gene_name not in exons:
-                exons[gene_name] = {
+            elif gene_name not in kwargs['exons']:
+                kwargs['exons'][gene_name] = {
                     'scaffold_name': scaffold_name,
                     'mrna_name': {
                         mrna_name: {
@@ -79,90 +86,108 @@ def parse_psl(psl, feature, gff, gff_cols, exons={}):
                         }
                     }
                 }
-            elif mrna_name not in exons[gene_name]['mrna_name']:
-                exons[gene_name]['mrna_name'][mrna_name] = {
+            elif mrna_name not in kwargs['exons'][gene_name]['mrna_name']:
+                kwargs['exons'][gene_name]['mrna_name'][mrna_name] = {
                     'start': tstarts[0],
                     'end': tstarts[-1] + blocksizes[-1],
                     'strand': strand
                 }
             else:
-                exons[gene_name]['mrna_name'][mrna_name]['start'] = min(
-                    exons[gene_name]['mrna_name'][mrna_name]['start'],
+                kwargs['exons'][gene_name]['mrna_name'][mrna_name]['start'] = min(
+                    kwargs['exons'][gene_name]['mrna_name'][mrna_name]['start'],
                     tstarts[0]
                 )
-                exons[gene_name]['mrna_name'][mrna_name]['end'] = max(
-                    exons[gene_name]['mrna_name'][mrna_name]['end'],
+                kwargs['exons'][gene_name]['mrna_name'][mrna_name]['end'] = max(
+                    kwargs['exons'][gene_name]['mrna_name'][mrna_name]['end'],
                     tstarts[-1] + blocksizes[-1]
                 )
+            compare_blocks = True
             # Check number of blocks is equal
-            if mrna_name not in gff:
+            try:
+                maker_blocksizes = set([x[1]-x[0] for x in kwargs['gffs']['maker'][mrna_name][feature]])
+                maker_num_blocks = len(kwargs['gffs']['maker'][mrna_name][feature])
+            except KeyError:
                 logging.warning(
-                    '"{}" not found in reference gff! ' \
-                    'Cannot check block sizes!'.format(mrna_name)
+                    '"{}" not found in reference gff "{}"! ' \
+                    'Cannot check block sizes!'.format(mrna_name, 'maker')
                 )
-            else:
-                num_psl_blocks = len(blocksizes)
-                num_gff_blocks = len(gff[mrna_name][feature])
-                gff_blocksizes = set([x[1]-x[0] for x in gff[mrna_name][feature]])
-                psl_blocksizes = set([x-1 for x in blocksizes])
-                # If the GFF is missing a block present in PSL
-                in_gff_not_psl = gff_blocksizes - psl_blocksizes
-                # If the PSL is missing a block present in GFF
-                in_psl_not_gff = psl_blocksizes - gff_blocksizes
-                if in_gff_not_psl or in_psl_not_gff:
+                compare_blocks = False
+            try:
+                gmap_blocksizes = set([x[1]-x[0] for x in kwargs['gffs']['gmap'][mrna_name][feature]])
+                gmap_num_blocks = len(kwargs['gffs']['gmap'][mrna_name][feature])
+            except KeyError:
+                logging.warning(
+                    '"{}" not found in reference gff "{}"! ' \
+                    'Cannot check block sizes!'.format(mrna_name, 'gmap')
+                )
+                gmap_blocksizes = set()
+                gmap_num_blocks = 0
+            blat_blocksizes = set([x-1 for x in blocksizes])
+            blat_num_blocks = len(blocksizes)
+            if compare_blocks:
+                if ((gmap_num_blocks == maker_num_blocks) and (gmap_blocksizes == maker_blocksizes)):
+                    pass
+                elif ((blat_num_blocks == maker_num_blocks) and (blat_blocksizes == maker_blocksizes)):
+                    pass
+                else:
+                    in_maker_not_gmap = maker_blocksizes - gmap_blocksizes
+                    in_maker_not_blat = maker_blocksizes - blat_blocksizes
+                    in_gmap_not_maker = gmap_blocksizes - maker_blocksizes
+                    in_gmap_not_blat = gmap_blocksizes - blat_blocksizes
+                    in_blat_not_maker = blat_blocksizes - maker_blocksizes
+                    in_blat_not_gmap = blat_blocksizes - gmap_blocksizes
                     output = [
                         scaffold_name,
                         mrna_name,
-                        str(num_psl_blocks),
-                        str(num_gff_blocks),
-                        (',').join([str(x) for x in in_psl_not_gff]) or 'NA',
-                        (',').join([str(x) for x in in_gff_not_psl]) or 'NA',
-                        (',').join([str(x[1]-x[0]) for x in zip(in_psl_not_gff, in_gff_not_psl)])
+                        str(maker_num_blocks),
+                        str(gmap_num_blocks),
+                        str(blat_num_blocks),
+                        (',').join([str(x) for x in in_maker_not_gmap]) or 'NA',
+                        (',').join([str(x) for x in in_maker_not_blat]) or 'NA',
+                        (',').join([str(x) for x in in_gmap_not_maker]) or 'NA',
+                        (',').join([str(x) for x in in_gmap_not_blat]) or 'NA',
+                        (',').join([str(x) for x in in_blat_not_maker]) or 'NA',
+                        (',').join([str(x) for x in in_blat_not_gmap]) or 'NA',
                     ]
                     logging.warning(
-                        # Output tsv line with columns
-                        # v3 scaffold, v2 transcript, num v3 blocks, num v2 blocks,
-                        # blocks in v3 not v2, blocks in v2 not v3
                         ('\t').join(output)
                     )
             for i,start in enumerate(tstarts):
-                out = {key:None for key in gff_cols}
-                out['source'] = 'pslToGff'
-                out['feature'] = feature
-                out['start'] = str(tstarts[i])
+                out = Gff()
+                out.source = 'pslToGff'
+                out.feature = feature
+                out.start = tstarts[i]
                 logging.debug('blocksizes: {}'.format(blocksizes))
                 logging.debug('tstarts: {}'.format(tstarts))
                 logging.debug('i: {}'.format(i))
-                out['end'] = str(tstarts[i] + blocksizes[i])
-                out['score'] = '0'
+                out.end = tstarts[i] + blocksizes[i]
+                out.score = '0'
                 # These boundaries can be fixed in this case
-                #out['seqname'] = mrna_name[6:26]
-                out['seqname'] = scaffold_name
-                out['strand'] = strand
-                out['frame'] = '0'
+                out.seqname = scaffold_name
+                out.strand = strand
+                out.frame = '0'
                 attributes = {
                     'ID': '{}:{}:{}'.format(mrna_name, feature, i),
                     'Parent': mrna_name,
                     'Name': gene_name
                 }
-                out['attribute'] = ('; ').join(
-                    [
-                        '{}={}'.format(k,v) for k,v in attributes.items()
-                    ]
-                )
-                print(('\t').join(
-                    [out[key] for key in gff_cols]
-                ))
+                out.attribute = attributes
+                print(out)
     logging.info('Parsed "{}" in {}s'.format(psl, time.time()-stime))
     return exons
 
 if __name__ == '__main__':
+
     parser = argparse.ArgumentParser(
         description='Given psl files, return a gff file',
         formatter_class=argparse.ArgumentDefaultsHelpFormatter
     )
     
-    parser.add_argument('gff', help='reference gff file with the "ID" attribute set to the Qname of the psl')
+    parser.add_argument('maker_gff', help='reference gff file with the "ID" attribute set to the Qname of the psl')
+    parser.add_argument('gmap_gff', help='Another gff file')
+    parser.add_argument('maker_proteins', help='Maker protein sequences in tsv format')
+    parser.add_argument('gmap_proteins', help='Gmap protein sequences in tsv format')
+    parser.add_argument('blat_proteins', help='Blat protein sequences in tsv format')
     parser.add_argument('-ep', '--exon_psls', nargs='+', help='exon psl file input')
     parser.add_argument('-cp', '--cds_psls', nargs='+', help='CDS psl file input')
     #parser.add_argument('-f', '--feature', default='exon', help='A feature name for the gff output, must match the feature names from the gff input')
@@ -178,105 +203,90 @@ if __name__ == '__main__':
     )
 
     # Log columns
-    logging.warning(
-        'Columns = v3(BLAT PSL) scaffold, v2(Maker GFF) transcript, ' \
-        'num v3 blocks, num v2 blocks, ' \
-        'blocksizes in v3 not v2, blocksizes in v2 not v3, ' \
-        'block size differences v3-v2 for each'
-    )
+    # logging.warning(
+    #     'Columns = v3(BLAT PSL) scaffold, v2(Maker GFF) transcript, ' \
+    #     'num v3 blocks, num v2 blocks, ' \
+    #     'blocksizes in v3 not v2, blocksizes in v2 not v3, ' \
+    #     'block size differences v3-v2 for each'
+    # )
 
     # Keep track of gene sizes
     genes = {}
 
-    # GFF format columns
-    gff_cols = (
-        'seqname',
-        'source',
-        'feature',
-        'start',
-        'end',
-        'score',
-        'strand',
-        'frame',
-        'attribute'
-    )
-
     # Load gff into memory
-    gff = {}
+    maker_gff = {}
+    gmap_gff = {}
 
-    with open(args.gff, 'r') as f:
-        for line in f:
-            if line[0] == '#':
-                continue
-            cols = line.strip().split('\t')
-            attributes = cols[8]
-            start = int(cols[3])
-            end = int(cols[4])
-            feature = cols[2]
-            # Since this script is very specific I can 
-            # hardcode the CDS and exon
-            if feature not in ('CDS', 'exon'):
-                continue
-            attributes = dict([x.split('=') for x in attributes.split(';')])
-            names = attributes['Parent'].split(',')
-            for name in names:
-                if name not in gff:
-                    gff[name] = {}
-                if feature not in gff[name]:
-                    gff[name][feature] = []
-                gff[name][feature].append((start, end))
+    for gff in Gff.read(args.maker_gff):
+        if gff.feature not in ('CDS', 'exon'):
+            continue
+        names = gff.attribute['Parent'].split(',')
+        for name in names:
+            if name not in maker_gff:
+                maker_gff[name] = {}
+            if gff.feature not in maker_gff[name]:
+                maker_gff[name][gff.feature] = []
+            maker_gff[name][gff.feature].append((gff.start, gff.end))
+
+    for gff in Gff.read(args.gmap_gff):
+        if gff.feature not in ('CDS', 'exon'):
+            continue
+        name = gff.attribute['Name']
+        if name not in gmap_gff:
+            gmap_gff[name] = {}
+        if gff.feature not in gmap_gff[name]:
+            gmap_gff[name][gff.feature] = []
+        gmap_gff[name][gff.feature].append((gff.start, gff.end))
 
     # Keep track of exon boundaries
     exons = {}
     if args.exon_psls:
         for psl in args.exon_psls:
-            exons = parse_psl(psl, 'exon', gff, gff_cols, exons=exons)
+            exons = parse_psl(psl,
+                'exon',
+                exons = exons,
+                gffs = {
+                    'maker': maker_gff,
+                    'gmap': gmap_gff
+                }
+            )
     if args.cds_psls:
         for psl in args.cds_psls:
-            parse_psl(psl, 'CDS', gff, gff_cols)
+            parse_psl(psl,
+                'CDS',
+                gffs = {
+                    'maker': maker_gff,
+                    'gmap': gmap_gff
+                }
+            )
 
     for gene in exons:
-        out = {key:'NA' for key in gff_cols}
-        out['source'] = 'pslToGff'
-        out['feature'] = 'gene'
-        out['start'] = str(min([exons[gene]['mrna_name'][x]['start'] for x in exons[gene]['mrna_name']]))
-        out['end'] = str(max([exons[gene]['mrna_name'][x]['end'] for x in exons[gene]['mrna_name']]))
-        out['score'] = '0'
+        out = Gff()
+        out.source = 'pslToGff'
+        out.feature = 'gene'
+        out.start = min([exons[gene]['mrna_name'][x]['start'] for x in exons[gene]['mrna_name']])
+        out.end = max([exons[gene]['mrna_name'][x]['end'] for x in exons[gene]['mrna_name']])
+        out.score = '0'
         # These boundaries can be fixed in this case
-        #out['seqname'] = gene[6:26]
-        out['seqname'] = exons[gene]['scaffold_name']
-        out['strand'] = exons[gene]['mrna_name'][list(exons[gene]['mrna_name'])[0]]['strand']
-        out['frame'] = '0'
-        #out['attribute'] = 'ID={}'.format(gene)
+        out.seqname = exons[gene]['scaffold_name']
+        out.strand = exons[gene]['mrna_name'][list(exons[gene]['mrna_name'])[0]]['strand']
+        out.frame = '0'
         # Added Name attribute to allow for grouping
         attributes = {
             'ID': gene,
             'Name': gene
         }
-        out['attribute'] = ('; ').join(
-            [
-                '{}={}'.format(k,v) for k,v in attributes.items()
-            ]
-        )
-
-        print(('\t').join(
-            [out[key] for key in gff_cols]
-        ))
+        out.attribute = attributes
+        print(out)
         for mrna in exons[gene]['mrna_name']:
-            out['feature'] = 'mRNA'
-            out['start'] = str(exons[gene]['mrna_name'][mrna]['start'])
-            out['end'] = str(exons[gene]['mrna_name'][mrna]['end'])
+            out.feature = 'mRNA'
+            out.start = exons[gene]['mrna_name'][mrna]['start']
+            out.end = exons[gene]['mrna_name'][mrna]['end']
             # These boundaries can be fixed in this case
             attributes = {
                 'ID': mrna,
                 'Parent': gene,
                 'Name': gene
             }
-            out['attribute'] = ('; ').join(
-                [
-                    '{}={}'.format(k,v) for k,v in attributes.items()
-                ]
-            )
-            print(('\t').join(
-                [out[key] for key in gff_cols]
-            ))
+            out.attribute = attributes
+            print(out)

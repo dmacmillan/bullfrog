@@ -2,8 +2,8 @@ import argparse
 import os
 import sys
 import logging
-import pysam
 from itertools import groupby
+import pysam
 from customFunctions import *
 
 if __name__ == '__main__':
@@ -34,17 +34,11 @@ if __name__ == '__main__':
         filemode = 'w'
     )
     
-    # Open gff file
-    gff_file_object = open(args.gff, 'r')
-    
     # Open transcripts fasta
     transcripts = pysam.FastaFile(args.transcripts)
     
     # Load gff into Pysam object
-    gff = pysam.tabix_iterator(
-        gff_file_object,
-        parser = pysam.asGTF()
-    )
+    gff = Gff.read(args.gff)
     
     # Sorting GFF is annoying in bash alone,
     # so I opt to store it in memory and then spit it back
@@ -53,8 +47,9 @@ if __name__ == '__main__':
 
     with open(os.path.join(args.outdir, args.name), 'w') as o:
         for line in gff:
-            attributes = dict([x.split('=') for x in line.attributes.split('; ')])
-            name = attributes['Name']
+            if line.feature != 'CDS':
+                continue
+            name = line.attribute['Parent']
             if name not in txts:
                 txts[name] = [line] 
             else:
@@ -62,14 +57,14 @@ if __name__ == '__main__':
         for txt in txts:
             logging.debug('txt: {}'.format(txt))
             txts[txt] = sorted(txts[txt], key = lambda x: x.start)
-            for x in txts[txt]:
-                logging.debug('x: {}'.format(x))
+            # for x in txts[txt]:
+            #     logging.debug('x: {}'.format(x))
             strand = txts[txt][0].strand
-            cds = [x for x in txts[txt] if x.feature == 'CDS']
+            cds = txts[txt]
             if not cds:
                 logging.warning('Transcript "{}"" has no CDS!'.format(txt))
                 continue
-            seq = ('').join([transcripts.fetch(x.contig, x.start, x.end) for x in cds])
+            seq = ('').join([transcripts.fetch(x.seqname, x.start-1, x.end) for x in cds])
             if strand == '-':
                 seq = rev_comp(seq)
             aa = trans(seq)
@@ -89,7 +84,7 @@ if __name__ == '__main__':
             logging.debug('aa: {}'.format(aa))
             o.write(
                 ('\t').join((
-                    cds[0].contig,
+                    cds[0].seqname,
                     txt,
                     aa
                 )) + '\n'
