@@ -1,0 +1,5 @@
+Rc-01r160223s0607257	maker	mRNA	47	958	.	-	.	ID=maker-Rc-01r160223s0607257-snap-gene-0.1-mRNA-1;Parent=maker-Rc-01r160223s0607257-snap-gene-0.1;Name=maker-Rc-01r160223s0607257-snap-gene-0.1-mRNA-1;_AED=0.06;_eAED=0.13;_QI=0|1|0|1|0|0|2|0|292
+Rc-01r160223s0607257	maker	exon	812	958	.	-	.	ID=maker-Rc-01r160223s0607257-snap-gene-0.1-mRNA-1:exon:719;Parent=maker-Rc-01r160223s0607257-snap-gene-0.1-mRNA-1
+Rc-01r160223s0607257	maker	exon	47	775	.	-	.	ID=maker-Rc-01r160223s0607257-snap-gene-0.1-mRNA-1:exon:718;Parent=maker-Rc-01r160223s0607257-snap-gene-0.1-mRNA-1
+Rc-01r160223s0607257	maker	CDS	812	958	.	-	0	ID=maker-Rc-01r160223s0607257-snap-gene-0.1-mRNA-1:cds;Parent=maker-Rc-01r160223s0607257-snap-gene-0.1-mRNA-1
+Rc-01r160223s0607257	maker	CDS	47	775	.	-	0	ID=maker-Rc-01r160223s0607257-snap-gene-0.1-mRNA-1:cds;Parent=maker-Rc-01r160223s0607257-snap-gene-0.1-mRNA-1
